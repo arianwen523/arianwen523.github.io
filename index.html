@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Poker Buddy</title>
+    <style>
+        :root {
+            --bg: #121212;
+            --card-bg: #1e1e1e;
+            --primary: #00e676;
+            --text: #ffffff;
+            --accent: #2979ff;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 0;
+            padding-bottom: 70px; /* Space for nav bar */
+        }
+
+        /* Tabs Logic */
+        .page { display: none; padding: 20px; }
+        .page.active { display: block; }
+
+        /* Header */
+        h2 { text-align: center; color: var(--primary); }
+
+        /* Calculator UI */
+        .card-input-group {
+            display: flex;
+            justify-content: space-around;
+            margin-bottom: 20px;
+        }
+        .card-box {
+            background: var(--card-bg);
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+            width: 40%;
+            border: 2px solid #333;
+        }
+        .card-box.active { border-color: var(--primary); }
+
+        .selector-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            margin-top: 20px;
+        }
+        button.chip {
+            background: #333;
+            color: white;
+            border: none;
+            padding: 12px;
+            border-radius: 8px;
+            font-weight: bold;
+        }
+        button.chip:active { background: var(--accent); }
+
+        .result-display {
+            text-align: center;
+            font-size: 2rem;
+            margin: 30px 0;
+            padding: 20px;
+            background: var(--card-bg);
+            border-radius: 15px;
+        }
+
+        /* Log UI */
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-size: 0.9rem; color: #bbb; }
+        input {
+            width: 100%;
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid #444;
+            background: #222;
+            color: white;
+            box-sizing: border-box;
+        }
+        .save-btn {
+            width: 100%;
+            padding: 15px;
+            background: var(--primary);
+            border: none;
+            border-radius: 8px;
+            font-weight: bold;
+            margin-top: 10px;
+        }
+
+        .history-list { margin-top: 25px; }
+        .log-item {
+            background: var(--card-bg);
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+        }
+        .profit { color: var(--primary); }
+        .loss { color: #ff5252; }
+
+        /* Bottom Nav */
+        nav {
+            position: fixed;
+            bottom: 0;
+            width: 100%;
+            height: 60px;
+            background: #1e1e1e;
+            display: flex;
+            border-top: 1px solid #333;
+        }
+        nav button {
+            flex: 1;
+            background: none;
+            border: none;
+            color: #888;
+            font-size: 0.8rem;
+        }
+        nav button.active { color: var(--primary); font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <div id="calc" class="page active">
+        <h2>Pre-Flop Odds</h2>
+        <div class="card-input-group">
+            <div id="card1" class="card-box active" onclick="selectSlot(1)">-</div>
+            <div id="card2" class="card-box" onclick="selectSlot(2)">-</div>
+        </div>
+        <div class="result-display">
+            <div style="font-size: 1rem; color: #888;">Win Probability</div>
+            <span id="win-pct">--</span>%
+        </div>
+        <div class="selector-grid" id="controls">
+            </div>
+        <button class="save-btn" style="background: #444;" onclick="resetCalc()">Clear Cards</button>
+    </div>
+
+    <div id="logs" class="page">
+        <h2>Session Log</h2>
+        <div class="form-group">
+            <label>Stakes (e.g., $1/$2)</label>
+            <input type="text" id="log-stakes" placeholder="1/2">
+        </div>
+        <div class="form-group">
+            <label>Duration (Hours)</label>
+            <input type="number" id="log-time" placeholder="4">
+        </div>
+        <div class="form-group">
+            <label>Profit / Loss ($)</label>
+            <input type="number" id="log-cash" placeholder="+150 or -50">
+        </div>
+        <button class="save-btn" onclick="saveSession()">Save Session</button>
+
+        <div class="history-list" id="history-list">
+            </div>
+    </div>
+
+    <nav>
+        <button id="nav-calc" class="active" onclick="showPage('calc')">CALC</button>
+        <button id="nav-logs" onclick="showPage('logs')">LOGS</button>
+    </nav>
+
+    <script>
+        // --- DATA & LOGIC ---
+        let hand = [null, null];
+        let activeSlot = 1;
+        const ranks = ['A', 'K', 'Q', 'J', 'T', '9', '8', '7', '6', '5', '4', '3', '2'];
+        
+        // Simple equity approximation table (High Card Win % against 1 random hand)
+        const oddsMap = { 'AA': 85, 'KK': 82, 'QQ': 80, 'JJ': 77, 'TT': 75, 'AK': 65, 'AQ': 64, 'AJ': 62, 'KQ': 62 };
+
+        function init() {
+            const grid = document.getElementById('controls');
+            ranks.forEach(r => {
+                const btn = document.createElement('button');
+                btn.className = 'chip';
+                btn.innerText = r;
+                btn.onclick = () => setCard(r);
+                grid.appendChild(btn);
+            });
+            renderLogs();
+        }
+
+        function showPage(pageId) {
+            document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+            document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+            document.getElementById(pageId).classList.add('active');
+            document.getElementById('nav-' + pageId).classList.add('active');
+        }
+
+        function selectSlot(s) {
+            activeSlot = s;
+            document.getElementById('card1').classList.toggle('active', s === 1);
+            document.getElementById('card2').classList.toggle('active', s === 2);
+        }
+
+        function setCard(rank) {
+            hand[activeSlot - 1] = rank;
+            document.getElementById('card' + activeSlot).innerText = rank;
+            
+            if (activeSlot === 1) selectSlot(2);
+            calculateOdds();
+        }
+
+        function calculateOdds() {
+            if (!hand[0] || !hand[1]) return;
+            let combo = hand.sort().reverse().join(''); // Sort to match map (e.g., KA -> AK)
+            let chance = oddsMap[combo] || 50; // Default 50% for lower hands
+            document.getElementById('win-pct').innerText = chance;
+        }
+
+        function resetCalc() {
+            hand = [null, null];
+            document.getElementById('card1').innerText = '-';
+            document.getElementById('card2').innerText = '-';
+            document.getElementById('win-pct').innerText = '--';
+            selectSlot(1);
+        }
+
+        // --- SESSION LOGIC ---
+        function saveSession() {
+            const stakes = document.getElementById('log-stakes').value;
+            const time = document.getElementById('log-time').value;
+            const cash = document.getElementById('log-cash').value;
+
+            if (!stakes || !time || !cash) return alert("Please fill all fields");
+
+            const session = { stakes, time, cash, date: new Date().toLocaleDateString() };
+            let history = JSON.parse(localStorage.getItem('pokerHistory') || '[]');
+            history.unshift(session);
+            localStorage.setItem('pokerHistory', JSON.stringify(history));
+            
+            renderLogs();
+            // Clear inputs
+            document.getElementById('log-time').value = '';
+            document.getElementById('log-cash').value = '';
+        }
+
+        function renderLogs() {
+            const list = document.getElementById('history-list');
+            const history = JSON.parse(localStorage.getItem('pokerHistory') || '[]');
+            list.innerHTML = history.map(s => `
+                <div class="log-item">
+                    <div>
+                        <strong>${s.stakes}</strong> <br>
+                        <small>${s.date} • ${s.time}hrs</small>
+                    </div>
+                    <div class="${parseInt(s.cash) >= 0 ? 'profit' : 'loss'}">
+                        ${parseInt(s.cash) >= 0 ? '+' : ''}${s.cash}$
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        init();
+    </script>
+</body>
+</html>
